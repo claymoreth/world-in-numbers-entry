@@ -140,14 +140,6 @@ export function viewDemographics(state) {
     <section class="panel">
       <div class="panel-head"><h2>Age-Sex Population Pyramid, ${year === 2025 ? '2025 (UN projection)' : '1950'}</h2>
       <div class="pills">${pill(1950)}${pill(2025)}</div></div>
-      <div class="stat-grid" id="pyramid-summary">
-        <div class="stat-cell"><div class="s-val">${s.total}</div><div class="s-lab">Total population</div></div>
-        <div class="stat-cell"><div class="s-val">${s.medianAge.toFixed(1)} years</div><div class="s-lab">Median age</div></div>
-        <div class="stat-cell"><div class="s-val">${s.under20.toFixed(1)}%</div><div class="s-lab">Under 20</div></div>
-        <div class="stat-cell"><div class="s-val">${s.over65.toFixed(1)}%</div><div class="s-lab">65 and over</div></div>
-        <div class="stat-cell"><div class="s-val">${s.age2064.toFixed(1)}%</div><div class="s-lab">Aged 20–64</div></div>
-        <div class="stat-cell"><div class="s-val">${s.oldPer100}</div><div class="s-lab">65+ per 100 aged 20–64</div></div>
-      </div>
       <div class="pyramid-legend"><span><span class="dot m"></span>Male</span><span><span class="dot f"></span>Female</span><span>Values in millions</span></div>
       <div class="pyramid-wrap" id="pyramid-chart">${pyramid(bands, s.note)}</div>
       <div class="brackets">${brackets}</div>
