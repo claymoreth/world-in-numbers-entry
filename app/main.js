@@ -1,116 +1,147 @@
-// The World in Numbers — router, one global state object, and the wiring
-// for every control on the site. No network, no storage, no cookies.
-import { viewArchive, viewCountries, viewHome, viewPeople, viewRankings } from "./views.js";
+// main.js — bootstrap: hash router, shared header, page state, event binding.
+// Static only: no fetch, no network, no eval.
 
-// One state object for the whole site. Every control reads and writes it,
-// and every render starts from it.
+import { REGIONS } from './data.js';
+import { viewOverview, viewRankings, viewDemographics, viewRegions, viewArchive, viewSources } from './views.js';
+
 const state = {
-  route: "home",
-  year: 2025,
-  sortKey: "gdp",
-  sortDir: "desc",
-  archiveQuery: "",
+  route: '/',
+  chartTab: 'usa',
+  pyramidYear: 2025,
+  mapLayer: 'gdp',
+  selectedCode: 'USA',
+  compareCode: '',
+  sortKey: 'gdp',
+  sortDir: 'desc',
+  archiveQuery: '',
 };
 
-const ROUTES = {
-  home: { render: viewHome, title: "The World in Numbers — the ten largest economies, compared" },
-  countries: { render: viewCountries, title: "Countries — The World in Numbers" },
-  rankings: { render: viewRankings, title: "Rankings — The World in Numbers" },
-  people: { render: viewPeople, title: "People — The World in Numbers" },
-  archive: { render: viewArchive, title: "Archive — The World in Numbers" },
-};
+const NAV = [
+  ['/', 'Overview'], ['/rankings', 'Rankings'], ['/regions', 'Regions'],
+  ['/demographics', 'Demographics'], ['/archive', 'Data Tables'], ['/sources', 'Sources'],
+];
 
-const app = document.getElementById("app");
-const menuButton = document.getElementById("menu-button");
-const nav = document.getElementById("site-nav");
-
-function routeFromHash() {
-  const hash = window.location.hash.replace(/^#\/?/, "").split("/")[0];
-  return ROUTES[hash] ? hash : "home";
+function renderHeader() {
+  const links = NAV.map(([href, label]) =>
+    `<a href="#${href}" class="${state.route === href ? 'active' : ''}">${label}</a>`).join('');
+  document.getElementById('site-header').innerHTML = `
+    <div class="topbar"><span>The World in Numbers — Open World Accounts &amp; Reference Series (2020–2025)</span>
+    <span class="tag">Reference Edition | IMF WEO / World Bank WDI</span></div>
+    <div class="masthead">
+      <a class="brand" href="#/"><span class="mark">W</span><span><span class="name">The World in Numbers</span><br>
+      <span class="sub">A reference atlas of the world's ten largest economies</span></span></a>
+      <form class="searchbox" id="site-search" role="search">
+        <input id="site-search-input" type="search" placeholder="Search GDP, China, HDI..." aria-label="Search the archive">
+        <button type="submit">Search</button>
+      </form>
+      <nav class="tabs" aria-label="Sections">${links}</nav>
+    </div>`;
+  document.getElementById('site-search').addEventListener('submit', (e) => {
+    e.preventDefault();
+    state.archiveQuery = document.getElementById('site-search-input').value;
+    location.hash = '#/archive';
+  });
 }
 
 function render() {
-  const page = ROUTES[state.route];
-  app.innerHTML = page.render(state);
-  document.title = page.title;
-  document.querySelectorAll("#site-nav a").forEach((a) => {
-    const href = a.getAttribute("href") ?? "";
-    const name = href.replace(/^#\/?/, "").split("/")[0] || "home";
-    if (name === state.route) a.setAttribute("aria-current", "page");
-    else a.removeAttribute("aria-current");
-  });
-  wireControls();
+  renderHeader();
+  const app = document.getElementById('app');
+  const view =
+    state.route === '/rankings' ? viewRankings(state) :
+    state.route === '/regions' ? viewRegions(state) :
+    state.route === '/demographics' ? viewDemographics(state) :
+    state.route === '/archive' ? viewArchive(state) :
+    state.route === '/sources' ? viewSources() :
+    viewOverview(state);
+  app.innerHTML = view;
+  bind(app);
   window.scrollTo(0, 0);
 }
 
-function wireControls() {
-  const yearSelect = document.getElementById("year-select");
-  if (yearSelect) {
-    yearSelect.addEventListener("change", () => {
-      const next = Number(yearSelect.value);
-      if (Number.isInteger(next) && next >= 2020 && next <= 2025) {
-        state.year = next;
-        render();
-      }
-    });
-  }
-
-  document.querySelectorAll(".sort-btn").forEach((button) => {
-    button.addEventListener("click", () => {
-      const key = button.getAttribute("data-sort");
-      if (!key) return;
-      if (state.sortKey === key) {
-        state.sortDir = state.sortDir === "desc" ? "asc" : "desc";
-      } else {
-        state.sortKey = key;
-        state.sortDir = "desc";
-      }
+function bindSort(scope) {
+  scope.querySelectorAll('[data-sort]').forEach((el) => {
+    const go = () => {
+      const key = el.dataset.sort;
+      if (state.sortKey === key) state.sortDir = state.sortDir === 'desc' ? 'asc' : 'desc';
+      else { state.sortKey = key; state.sortDir = key === 'name' ? 'asc' : 'desc'; }
       render();
-    });
+    };
+    el.addEventListener('click', go);
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+  });
+}
+
+function bind(app) {
+  bindSort(app);
+
+  // Overview chart series tabs.
+  app.querySelectorAll('[data-chart-tab]').forEach((b) =>
+    b.addEventListener('click', () => { state.chartTab = b.dataset.chartTab; render(); }));
+
+  // Demographics year pills.
+  app.querySelectorAll('[data-pyramid-year]').forEach((b) =>
+    b.addEventListener('click', () => { state.pyramidYear = Number(b.dataset.pyramidYear); render(); }));
+
+  // Regions layer tabs.
+  app.querySelectorAll('[data-map-layer]').forEach((b) =>
+    b.addEventListener('click', () => { state.mapLayer = b.dataset.mapLayer; render(); }));
+
+  // Map markers + continent polygons select a country / region.
+  app.querySelectorAll('.marker').forEach((m) => {
+    const pick = () => { state.selectedCode = m.dataset.country; render(); };
+    m.addEventListener('click', pick);
+    m.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+  });
+  app.querySelectorAll('.map-svg polygon').forEach((p) =>
+    p.addEventListener('click', () => {
+      const first = { 'North America': 'USA', 'Europe': 'DEU', 'Asia': 'CHN', 'South America': 'BRA' }[p.dataset.region];
+      if (first) { state.selectedCode = first; render(); }
+    }));
+
+  // Compare dropdown.
+  const cmp = app.querySelector('#compare-select');
+  if (cmp) cmp.addEventListener('change', () => { state.compareCode = cmp.value; render(); });
+
+  // Regional CSV export (Blob download, no network).
+  const exp = app.querySelector('#export-csv');
+  if (exp) exp.addEventListener('click', () => {
+    const head = 'Region,GDP ($ trillion),Share of world GDP (%),Population (million),GDP per capita ($),GDP growth 2024-2025 (%),HDI\n';
+    const lines = REGIONS.map((r) => [
+      r.name, r.gdp.toFixed(2), r.share.toFixed(1),
+      r.population === null ? '' : r.population.toFixed(2),
+      r.gdpPerCapita === null ? '' : r.gdpPerCapita,
+      r.growth === null ? '' : r.growth.toFixed(1),
+      r.hdi === null ? '' : r.hdi.toFixed(3),
+    ].join(',')).join('\n');
+    const blob = new Blob([head + lines + '\n'], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'regional-output-2025.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   });
 
-  const search = document.getElementById("archive-search");
+  // Archive live search.
+  const search = app.querySelector('#archive-search');
   if (search) {
-    search.addEventListener("input", () => {
+    search.addEventListener('input', () => {
       state.archiveQuery = search.value;
-      filterArchive(search.value);
+      const pos = search.selectionStart;
+      render();
+      const again = document.getElementById('archive-search');
+      if (again) { again.focus(); again.setSelectionRange(pos, pos); }
     });
-    // Keep the caret where the reader left it after a re-render.
-    search.focus();
-    search.setSelectionRange(search.value.length, search.value.length);
   }
 }
 
-// Live archive filter: hides rows in place so the search box never loses
-// focus or its text while the reader types.
-function filterArchive(query) {
-  const needle = query.trim().toLowerCase();
-  const body = document.getElementById("archive-body");
-  const count = document.getElementById("archive-count");
-  if (!body) return;
-  let shown = 0;
-  let total = 0;
-  body.querySelectorAll("tr").forEach((row) => {
-    total += 1;
-    const match = !needle || row.textContent.toLowerCase().includes(needle);
-    row.style.display = match ? "" : "none";
-    if (match) shown += 1;
-  });
-  if (count) count.textContent = `${shown} of ${total} figures shown`;
-}
-
-function onHashChange() {
-  state.route = routeFromHash();
-  nav.classList.remove("open");
-  menuButton.setAttribute("aria-expanded", "false");
+function route() {
+  // Unknown hashes fall back to the Overview instead of a blank page.
+  const hash = location.hash.replace(/^#/, '') || '/';
+  state.route = NAV.some(([h]) => h === hash) ? hash : '/';
   render();
 }
 
-menuButton.addEventListener("click", () => {
-  const open = nav.classList.toggle("open");
-  menuButton.setAttribute("aria-expanded", String(open));
-});
-
-window.addEventListener("hashchange", onHashChange);
-state.route = routeFromHash();
-render();
+window.addEventListener('hashchange', route);
+route();

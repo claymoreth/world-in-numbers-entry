@@ -1,324 +1,290 @@
-// Page views. Each function takes the shared state and returns the HTML
-// for one page. No view fetches anything: every figure comes from data.js.
-import { COUNTRIES, INDICATORS, SOURCES, WORLD, YEARS, formatNumber, gdpOf, top10GdpShare } from "./data.js";
-import { barChart, lineChart, PALETTE } from "./charts.js";
+// views.js — renders each page from data.js. All words are our own;
+// all numbers come from data.js (see the DATA SPEC for their sources).
 
-function sourceLine(text) {
-  return `<p class="source">Source: ${text}</p>`;
+import {
+  COUNTRIES, TOP10_TOTAL, REGIONS, CALENDAR, DEMO_SUMMARY, TRAJECTORY,
+  PYRAMID_2025, PYRAMID_1950, LAYERS, buildArchive, countryByCode,
+  layerValue, regionLayerValue,
+} from './data.js';
+import { lineChart, sparkline, pyramid, worldMap, barRow } from './charts.js';
+
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const fmtInt = (n) => n.toLocaleString('en-US');
+
+function kpiCard(label, value, note, src, sparkValues) {
+  return `<div class="kpi"><div class="k-label">${esc(label)}</div>
+    <div class="k-value">${esc(value)}</div>
+    <div class="k-note">${esc(note)}</div>
+    ${sparkValues ? sparkline(sparkValues) : ''}
+    <div class="k-src">${esc(src)}</div></div>`;
 }
 
-function yearSelect(year) {
-  const options = YEARS.map(
-    (y) => `<option value="${y}"${y === year ? " selected" : ""}>${y}</option>`,
-  ).join("");
-  return `<label class="year-picker">Year <select id="year-select" aria-label="Choose year">${options}</select></label>`;
-}
-
-// ---- Home ---------------------------------------------------------------
-
-export function viewHome(state) {
-  const year = state.year;
-  const share = top10GdpShare(2025);
-  const largest = COUNTRIES[0];
-  const mostPopulous = [...COUNTRIES].sort((a, b) => b.populationM - a.populationM)[0];
-  const bestHdi = [...COUNTRIES].sort((a, b) => b.hdi - a.hdi)[0];
-  const lowestUnemp = [...COUNTRIES].sort((a, b) => a.unemployment - b.unemployment)[0];
-
-  const cards = [
-    { value: `$${formatNumber(WORLD.gdpTn, 2)}tn`, label: "World GDP, 2025", source: "IMF, WEO Oct 2026" },
-    { value: `${formatNumber(WORLD.populationM / 1000, 2)}bn`, label: "World population, 2025", source: "World Bank WDI" },
-    { value: `$${formatNumber(WORLD.gdpPerCapita, 0)}`, label: "World GDP per capita, 2025", source: "World Bank WDI" },
-    { value: `${formatNumber(share.share, 1)}%`, label: "Top 10 share of world GDP, 2025", source: "Calculated from IMF WEO Oct 2026" },
-    { value: largest.name, label: `Largest economy — $${formatNumber(gdpOf(largest, 2025), 2)}tn, 2025`, source: "IMF, WEO Oct 2026" },
-    { value: mostPopulous.name, label: `Most populous — ${formatNumber(mostPopulous.populationM, 2)}m people, 2025`, source: "World Bank WDI" },
-    { value: bestHdi.name, label: `Highest HDI — ${formatNumber(bestHdi.hdi, 3)}, 2023`, source: "UNDP HDR 2025" },
-    { value: lowestUnemp.name, label: `Lowest unemployment — ${formatNumber(lowestUnemp.unemployment, 1)}%, 2025`, source: "IMF, WEO Oct 2026" },
-  ];
-
-  const gdpRows = [...COUNTRIES]
-    .sort((a, b) => (gdpOf(b, year) ?? 0) - (gdpOf(a, year) ?? 0))
-    .map((c) => ({ label: c.name, value: gdpOf(c, year) ?? 0 }));
-
-  const top3 = COUNTRIES.slice(0, 3);
-  const trend = top3.map((c, i) => ({
-    label: c.name,
-    color: [PALETTE.AMBER, PALETTE.TEAL, PALETTE.TEAL_LIGHT][i],
-    values: YEARS.map((y) => gdpOf(c, y) ?? 0),
-  }));
-
-  const miniRows = [...COUNTRIES]
-    .sort((a, b) => (gdpOf(b, 2025) ?? 0) - (gdpOf(a, 2025) ?? 0))
-    .slice(0, 5)
-    .map((c, i) => {
-      const g = gdpOf(c, 2025);
-      return `<tr><td>${i + 1}</td><td>${c.name}</td><td class="num">$${formatNumber(g, 2)}tn</td><td class="num">${formatNumber(c.gdpPerCapita, 0)}</td></tr>`;
-    })
-    .join("");
-
+// ---------------- Overview ----------------
+export function viewOverview(state) {
+  const series =
+    state.chartTab === 'usa' ? { values: COUNTRIES[0].gdp, label: 'United States GDP', color: '#0f3d3e',
+      annotations: [{ yearIndex: 0, text: '2020 $21.38tn — pandemic year low' }] } :
+    state.chartTab === 'china' ? { values: COUNTRIES[1].gdp, label: 'China GDP', color: '#2f6f8f', annotations: [] } :
+    { values: TOP10_TOTAL, label: 'Top-10 GDP total', color: '#e8a317',
+      annotations: [{ yearIndex: 0, text: '2020 $58.59tn' }, { yearIndex: 5, text: '2025 $78.51tn' }] };
+  const tab = (key, label) => `<button class="pill${state.chartTab === key ? ' active' : ''}" data-chart-tab="${key}">${label}</button>`;
+  const regionBars = REGIONS.map((r) =>
+    barRow(r.name, r.share.toFixed(1) + '%', r.share, r.name === 'Asia',
+      `GDP $${r.gdp.toFixed(2)}tn · growth ${r.growth === null ? 'n/a' : '+' + r.growth.toFixed(1) + '%'}`)).join('');
+  const cal = CALENDAR.map((c) =>
+    `<div class="cal-item"><div class="pub">${esc(c.publisher)}</div><div class="ttl">${esc(c.title)}</div><div class="cad">${esc(c.cadence)}</div></div>`).join('');
   return `
-  <section class="hero">
-    <p class="kicker">Ten economies. One world. Every figure sourced.</p>
-    <h1>The World in Numbers</h1>
-    <p class="lede">The ten largest economies on Earth, compared side by side on the figures that matter: output, income, people, prices, work and wellbeing. All figures are from the IMF, the World Bank and UNDP — with the source and year beside every number.</p>
-    <p class="hero-meta">Latest year: 2025 for GDP, population and prices · 2023 for human development</p>
+  <div class="page-head">
+    <div><h1>United States tops $30.86 trillion as India passes China as the most populous nation</h1>
+    <p class="dek">The ten largest economies now produce two-thirds of world output. This reference
+    edition gathers their GDP, population and development figures in one place, drawn from the
+    IMF, the World Bank, UNDP and the United Nations — so any comparison on this site can be
+    traced back to its official release.</p></div>
+    <div class="edition-label"><strong>2025 Annual Reference</strong>Published October 2026</div>
+  </div>
+  <section class="kpis" aria-label="Key figures">
+    ${kpiCard('World GDP', '$118.50tn', 'Top 10 hold 66.3%', 'IMF WEO, October 2026')}
+    ${kpiCard('World population', '8.22bn', 'India most populous at 1,463.87m', 'World Bank WDI, 2025')}
+    ${kpiCard('World GDP per capita', '$14,406', 'USA highest at $90,027; India lowest at $2,702', 'WDI, 2025')}
+    ${kpiCard('Top-10 share of world GDP', '66.3%', 'Top-10 total $78.51tn', 'Calculated from IMF WEO Oct 2026', TOP10_TOTAL)}
+    ${kpiCard('USA GDP', '$30.86tn', '+5.0% vs 2024', 'IMF WEO, October 2026', COUNTRIES[0].gdp)}
+    ${kpiCard('India population', '1,463.87m', '57.28m more than China', 'World Bank WDI, 2025')}
   </section>
-
-  <section aria-label="World headlines">
-    <h2>The world at a glance</h2>
-    <div class="cards">
-      ${cards.map((c) => `<article class="card"><p class="card-value">${c.value}</p><p class="card-label">${c.label}</p><p class="card-source">${c.source}</p></article>`).join("")}
+  <div class="grid-main">
+    <section class="panel">
+      <div class="panel-head"><h2>Nominal GDP, 2020–2025</h2>
+        <a class="btn" href="#/rankings">Open Full Explorer</a></div>
+      <p class="panel-sub">Trillions of US dollars, nominal. Switch series below.</p>
+      <div class="pills" role="tablist" aria-label="Chart series">
+        ${tab('usa', 'USA GDP')}${tab('china', 'China GDP')}${tab('top10', 'Top-10 GDP')}
+      </div>
+      <div id="home-chart">${lineChart(series)}</div>
+      <p class="src">Source: IMF, World Economic Outlook, October 2026. Top-10 total is calculated from the ten country series. USA grew +5.0% in 2025 (from $29.38tn to $30.86tn, calculated).</p>
+    </section>
+    <div>
+      <section class="panel">
+        <h2>Regional Output Share (2025)</h2>
+        <p class="panel-sub">Share of world GDP, calculated from the country figures.</p>
+        ${regionBars}
+        <p><a href="#/regions">Open Map &rarr;</a></p>
+      </section>
+      <section class="panel">
+        <h2>Official Release Calendar</h2>
+        <p class="panel-sub">When the figures on this site are published.</p>
+        ${cal}
+      </section>
     </div>
-  </section>
-
-  <section aria-label="GDP chart">
-    <div class="section-head">
-      <h2>GDP of the ten largest economies</h2>
-      ${yearSelect(year)}
-    </div>
-    <p class="section-note">Nominal GDP in current US dollars. Change the year to redraw the chart — the series runs 2020 to 2025.</p>
-    <div class="chart">${barChart(gdpRows, (v) => `$${formatNumber(v, 2)}tn`, { ariaLabel: `GDP by country, ${year}`, highlight: 0 })}</div>
-    ${sourceLine(`${SOURCES.gdp}, ${year}.`)}
-  </section>
-
-  <section aria-label="GDP trend">
-    <h2>The top three, 2020–2025</h2>
-    <p class="section-note">Nominal GDP, trillion current US$. The United States widened its lead after 2022; Japan fell back as the yen weakened.</p>
-    <div class="chart">${lineChart(trend, YEARS, (v) => `$${formatNumber(v, 2)}tn`, { ariaLabel: "GDP trend of the three largest economies, 2020 to 2025" })}</div>
-    <p class="legend"><span class="dot" style="background:${PALETTE.AMBER}"></span>United States <span class="dot" style="background:${PALETTE.TEAL}"></span>China <span class="dot" style="background:${PALETTE.TEAL_LIGHT}"></span>Germany</p>
-    ${sourceLine(SOURCES.gdp + ".")}
-  </section>
-
-  <section aria-label="Top five">
-    <h2>Top five economies, 2025</h2>
-    <table class="data-table">
-      <thead><tr><th>#</th><th>Country</th><th class="num">GDP</th><th class="num">GDP per capita</th></tr></thead>
-      <tbody>${miniRows}</tbody>
-    </table>
-    <p class="more-link"><a href="#/countries">See all ten countries →</a></p>
-    ${sourceLine(`${SOURCES.gdp}, 2025. ${SOURCES.gdpPerCapita}.`)}
-  </section>`;
+  </div>`;
 }
 
-// ---- Countries ----------------------------------------------------------
-
-export function viewCountries(state) {
-  const year = state.year;
-  const rows = [...COUNTRIES]
-    .sort((a, b) => (gdpOf(b, year) ?? 0) - (gdpOf(a, year) ?? 0))
-    .map((c, i) => {
-      const g = gdpOf(c, year);
-      return `<tr>
-        <td>${i + 1}</td><td><strong>${c.name}</strong><br><span class="region">${c.region}</span></td>
-        <td class="num">$${formatNumber(g, 2)}tn</td>
-        <td class="num">$${formatNumber(c.gdpPerCapita, 0)}</td>
-        <td class="num">${formatNumber(c.populationM, 2)}m</td>
-        <td class="num">${formatNumber(c.inflation, 1)}%</td>
-        <td class="num">${formatNumber(c.unemployment, 1)}%</td>
-        <td class="num">${formatNumber(c.hdi, 3)}</td>
-      </tr>`;
-    })
-    .join("");
-
-  const pcRows = [...COUNTRIES]
-    .sort((a, b) => b.gdpPerCapita - a.gdpPerCapita)
-    .map((c) => ({ label: c.name, value: c.gdpPerCapita }));
-
-  return `
-  <section>
-    <h1>Countries</h1>
-    <p class="lede">All ten economies on one table. GDP follows the year you pick; the other indicators are the latest verified year for each (2025, except HDI, 2023).</p>
-    <div class="section-head">
-      <h2>Comparison table</h2>
-      ${yearSelect(year)}
-    </div>
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead><tr><th>#</th><th>Country</th><th class="num">GDP ($tn, ${year})</th><th class="num">GDP per capita ($)</th><th class="num">Population (m)</th><th class="num">Inflation (%)</th><th class="num">Unemployment (%)</th><th class="num">HDI</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    ${sourceLine(`${SOURCES.gdp}. ${SOURCES.gdpPerCapita}. ${SOURCES.population}. ${SOURCES.inflation}. ${SOURCES.unemployment}. ${SOURCES.hdi}.`)}
-  </section>
-
-  <section aria-label="GDP per capita chart">
-    <h2>Income per person, 2025</h2>
-    <p class="section-note">GDP per capita, current US$. The United States earns more than six times China per person, even though China is the second-largest economy overall.</p>
-    <div class="chart">${barChart(pcRows, (v) => `$${formatNumber(v, 0)}`, { ariaLabel: "GDP per capita by country, 2025", highlight: 0 })}</div>
-    ${sourceLine(SOURCES.gdpPerCapita + ".")}
-  </section>`;
-}
-
-// ---- Rankings -----------------------------------------------------------
-
-const RANK_COLUMNS = [
-  { key: "gdp", label: "GDP ($tn)", get: (c) => gdpOf(c, 2025) ?? 0, format: (v) => `$${formatNumber(v, 2)}` },
-  { key: "gdpPerCapita", label: "GDP per capita ($)", get: (c) => c.gdpPerCapita, format: (v) => `$${formatNumber(v, 0)}` },
-  { key: "populationM", label: "Population (m)", get: (c) => c.populationM, format: (v) => formatNumber(v, 2) },
-  { key: "inflation", label: "Inflation (%)", get: (c) => c.inflation, format: (v) => `${formatNumber(v, 1)}%` },
-  { key: "unemployment", label: "Unemployment (%)", get: (c) => c.unemployment, format: (v) => `${formatNumber(v, 1)}%` },
-  { key: "hdi", label: "HDI", get: (c) => c.hdi, format: (v) => formatNumber(v, 3) },
-];
-
-export function viewRankings(state) {
-  const sortKey = state.sortKey ?? "gdp";
-  const sortDir = state.sortDir ?? "desc";
-  const col = RANK_COLUMNS.find((c) => c.key === sortKey) ?? RANK_COLUMNS[0];
-
-  const sorted = [...COUNTRIES].sort((a, b) => {
-    const diff = col.get(a) - col.get(b);
-    return sortDir === "desc" ? -diff : diff;
+// ---------------- Rankings (sortable table, reused on Regions) ----------------
+export function sortedCountries(key, dir) {
+  const val = (c) => (key === 'gdp' ? c.gdp[5] : key === 'name' ? c.name : c[key]);
+  return [...COUNTRIES].sort((a, b) => {
+    const va = val(a), vb = val(b);
+    const cmp = typeof va === 'string' ? va.localeCompare(vb) : va - vb;
+    return dir === 'asc' ? cmp : -cmp;
   });
-
-  const headers = RANK_COLUMNS.map((c) => {
-    const active = c.key === sortKey;
-    const arrow = active ? (sortDir === "desc" ? " ↓" : " ↑") : "";
-    return `<th class="num"><button class="sort-btn${active ? " active" : ""}" data-sort="${c.key}" aria-sort="${active ? (sortDir === "desc" ? "descending" : "ascending") : "none"}">${c.label}${arrow}</button></th>`;
-  }).join("");
-
-  const rows = sorted
-    .map((c, i) => {
-      const cells = RANK_COLUMNS.map((cc) => `<td class="num${cc.key === sortKey ? " sorted-col" : ""}">${cc.format(cc.get(c))}</td>`).join("");
-      return `<tr><td>${i + 1}</td><td><strong>${c.name}</strong></td>${cells}</tr>`;
-    })
-    .join("");
-
+}
+export function rankingsTable(state, idPrefix) {
+  const rows = sortedCountries(state.sortKey, state.sortDir);
+  const arrow = (key) => (state.sortKey === key ? (state.sortDir === 'desc' ? ' ▼' : ' ▲') : '');
+  const th = (key, label) => `<th class="sortable num" data-sort="${key}" tabindex="0" role="button" aria-label="Sort by ${label}">${label}${arrow(key)}</th>`;
+  const body = rows.map((c, i) => `<tr${i === 0 ? ' class="top-row"' : ''}>
+    <td>${esc(c.name)}</td><td class="num">$${c.gdp[5].toFixed(2)}tn</td>
+    <td class="num">$${fmtInt(c.gdpPerCapita)}</td><td class="num">${fmtInt(c.population)}m</td>
+    <td class="num">${c.inflation.toFixed(1)}%</td><td class="num">${c.unemployment.toFixed(1)}%</td>
+    <td class="num">${c.hdi.toFixed(3)}</td></tr>`).join('');
+  return `<table id="${idPrefix}-table"><thead><tr>
+    <th class="sortable" data-sort="name" tabindex="0" role="button">Country${arrow('name')}</th>
+    ${th('gdp', 'GDP')}${th('gdpPerCapita', 'GDP per capita')}${th('population', 'Population')}
+    ${th('inflation', 'Inflation')}${th('unemployment', 'Unemployment')}${th('hdi', 'HDI')}
+    </tr></thead><tbody>${body}</tbody></table>`;
+}
+export function viewRankings(state) {
+  // Note shown on the page, per the brief: all figures 2025 except HDI (2023).
   return `
-  <section>
-    <h1>Rankings</h1>
-    <p class="lede">Every ranking on one table. Click any column heading to re-sort all ten countries by that indicator — click again to flip the order. The highlighted column is the one you are sorting by. All figures are 2025, except HDI (2023).</p>
-    <div class="table-wrap">
-      <table class="data-table" id="rankings-table">
-        <thead><tr><th>#</th><th>Country</th>${headers}</tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    </div>
-    <p class="section-note">Sorting now: <strong>${col.label}</strong>, ${sortDir === "desc" ? "highest first" : "lowest first"}.</p>
-    ${sourceLine(`${SOURCES.gdp}, 2025. ${SOURCES.gdpPerCapita}. ${SOURCES.population}. ${SOURCES.inflation}. ${SOURCES.unemployment}. ${SOURCES.hdi}.`)}
-  </section>
-
-  <section aria-label="Reading the rankings">
-    <h2>What the rankings show</h2>
-    <ul class="read-list">
-      <li><strong>Size is not income:</strong> India is the 6th-largest economy but 10th of 10 on GDP per capita ($2,702).</li>
-      <li><strong>People are not output:</strong> India has the most people (1,463.87m) and China is second (1,406.59m) — together, 35% of humanity.</li>
-      <li><strong>Prices bite unevenly:</strong> Brazil's inflation (5.0%) is the highest of the ten; France's (0.9%) the lowest.</li>
-      <li><strong>Work is tightest in Japan:</strong> 2.5% unemployment, the lowest of the ten; France is highest at 7.7%.</li>
-      <li><strong>Wellbeing leads in Germany:</strong> HDI 0.959, the highest of the ten; India is lowest at 0.685.</li>
-    </ul>
+  <div class="page-head">
+    <div><h1>Rankings — the ten largest economies</h1>
+    <p class="dek">Click any column header to sort. The United States leads on GDP; Germany leads on
+    human development; Japan has the lowest unemployment of the ten.</p></div>
+    <div class="edition-label"><strong>All figures 2025</strong>except HDI (2023)</div>
+  </div>
+  <section class="panel">
+    <p class="panel-sub">GDP is nominal, in trillions of US dollars (IMF WEO, October 2026). GDP per capita and population are World Bank WDI 2025. Inflation and unemployment are IMF WEO October 2026. HDI is UNDP Human Development Report 2025 (2023).</p>
+    ${rankingsTable(state, 'rankings')}
   </section>`;
 }
 
-// ---- People -------------------------------------------------------------
-
-export function viewPeople(state) {
-  const popRows = [...COUNTRIES]
-    .sort((a, b) => b.populationM - a.populationM)
-    .map((c) => ({ label: c.name, value: c.populationM }));
-  const hdiRows = [...COUNTRIES]
-    .sort((a, b) => b.hdi - a.hdi)
-    .map((c) => ({ label: c.name, value: c.hdi }));
-
-  const rows = [...COUNTRIES]
-    .sort((a, b) => b.populationM - a.populationM)
-    .map((c, i) => `<tr>
-      <td>${i + 1}</td><td><strong>${c.name}</strong></td>
-      <td class="num">${formatNumber(c.populationM, 2)}m</td>
-      <td class="num">${formatNumber(c.hdi, 3)}</td>
-      <td class="num">${formatNumber(c.lifeExpectancy, 1)} yrs</td>
-    </tr>`)
-    .join("");
-
-  const top10Pop = COUNTRIES.reduce((acc, c) => acc + c.populationM, 0);
-
+// ---------------- Demographics ----------------
+export function viewDemographics(state) {
+  const year = state.pyramidYear;
+  const bands = year === 1950 ? PYRAMID_1950 : PYRAMID_2025;
+  const s = DEMO_SUMMARY[year];
+  const pill = (y) => `<button class="pill${year === y ? ' active' : ''}" data-pyramid-year="${y}">${y}${y === 2025 ? ' (projection)' : ''}</button>`;
+  const brackets = year === 2025
+    ? `<span>0–14: 24.4%</span><span>15–64: 65.2% (calculated)</span><span>65+: 10.4%</span>`
+    : `<span>Under 20: 44.3%</span><span>20–64: 50.6%</span><span>65+: 5.1%</span>`;
+  const traj = TRAJECTORY.map((t) => `<tr><td>${t.year}</td><td class="num">${t.medianAge.toFixed(1)}</td>
+    <td class="num">${t.under20.toFixed(1)}%</td><td class="num">${t.age2064.toFixed(1)}%</td>
+    <td class="num">${t.over65.toFixed(1)}%</td><td class="num">${t.oldPer100}</td></tr>`).join('');
   return `
-  <section>
-    <h1>People</h1>
-    <p class="lede">The ten economies hold ${formatNumber(top10Pop, 2)} million people — ${formatNumber((top10Pop / WORLD.populationM) * 100, 1)}% of everyone on Earth. This page is about them: how many, how long they live, and how developed their societies are.</p>
-  </section>
-
-  <section aria-label="Population chart">
-    <h2>Population, 2025</h2>
-    <p class="section-note">Midyear population, millions. India passed China as the world's most populous country in 2023; the gap is now about 57 million.</p>
-    <div class="chart">${barChart(popRows, (v) => `${formatNumber(v, 2)}m`, { ariaLabel: "Population by country, 2025", highlight: 0 })}</div>
-    ${sourceLine(SOURCES.population + ".")}
-  </section>
-
-  <section aria-label="HDI chart">
-    <h2>Human development, 2023</h2>
-    <p class="section-note">Human Development Index, 0 to 1. Germany leads the ten at 0.959; India trails at 0.685 — the only one of the ten below "high" development.</p>
-    <div class="chart">${barChart(hdiRows, (v) => formatNumber(v, 3), { ariaLabel: "Human Development Index by country, 2023", highlight: 0 })}</div>
-    ${sourceLine(SOURCES.hdi + ".")}
-  </section>
-
-  <section aria-label="People table">
-    <h2>People at a glance</h2>
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead><tr><th>#</th><th>Country</th><th class="num">Population (2025)</th><th class="num">HDI (2023)</th><th class="num">Life expectancy (2023)</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+  <div class="page-head">
+    <div><h1>Demographics — a world growing older, and still growing</h1>
+    <p class="dek">In 1950 the world held 2.5 billion people with a median age of 22.2. By 2025 it holds
+    8.23 billion, and the median age has risen to 30.9 years. The pyramid below shows how the
+    age structure shifted across 75 years.</p></div>
+    <div class="edition-label"><strong>2025 Snapshot</strong>Latest Official Release</div>
+  </div>
+  <div class="grid-2">
+    <section class="panel">
+      <div class="panel-head"><h2>Age-Sex Population Pyramid, ${year === 2025 ? '2025 (UN projection)' : '1950'}</h2>
+      <div class="pills">${pill(1950)}${pill(2025)}</div></div>
+      <div class="stat-grid" id="pyramid-summary">
+        <div class="stat-cell"><div class="s-val">${s.total}</div><div class="s-lab">Total population</div></div>
+        <div class="stat-cell"><div class="s-val">${s.medianAge.toFixed(1)} years</div><div class="s-lab">Median age</div></div>
+        <div class="stat-cell"><div class="s-val">${s.under20.toFixed(1)}%</div><div class="s-lab">Under 20</div></div>
+        <div class="stat-cell"><div class="s-val">${s.over65.toFixed(1)}%</div><div class="s-lab">65 and over</div></div>
+        <div class="stat-cell"><div class="s-val">${s.age2064.toFixed(1)}%</div><div class="s-lab">Aged 20–64</div></div>
+        <div class="stat-cell"><div class="s-val">${s.oldPer100}</div><div class="s-lab">65+ per 100 aged 20–64</div></div>
+      </div>
+      <div class="pyramid-legend"><span><span class="dot m"></span>Male</span><span><span class="dot f"></span>Female</span><span>Values in millions</span></div>
+      <div class="pyramid-wrap" id="pyramid-chart">${pyramid(bands, s.note)}</div>
+      <div class="brackets">${brackets}</div>
+      <p class="src">Source: UN World Population Prospects 2024 (medium variant); 2025 is a projection.</p>
+    </section>
+    <div>
+      <section class="panel">
+        <h2>Key Demographic Indicators (2025)</h2>
+        <div class="stat-grid">
+          <div class="stat-cell"><div class="s-val">8.23bn</div><div class="s-lab">Total population</div></div>
+          <div class="stat-cell"><div class="s-val">30.9 years</div><div class="s-lab">Median age</div></div>
+          <div class="stat-cell"><div class="s-val">32.4%</div><div class="s-lab">Under 20</div></div>
+          <div class="stat-cell"><div class="s-val">10.4%</div><div class="s-lab">65 and over</div></div>
+          <div class="stat-cell"><div class="s-val">37.4</div><div class="s-lab">Child dependency (per 100 aged 15–64)</div></div>
+          <div class="stat-cell"><div class="s-val">16.0</div><div class="s-lab">Old-age dependency (per 100 aged 15–64)</div></div>
+        </div>
+        <p>One person in three is under 20, yet the share aged 65 and over has doubled since 1950.
+        The world is still young in absolute numbers, but its centre of weight keeps moving upward.</p>
+      </section>
+      <section class="panel">
+        <h2>Demographic Trajectory</h2>
+        <table><thead><tr><th>Year</th><th class="num">Median age</th><th class="num">Under 20</th>
+        <th class="num">20–64</th><th class="num">65+</th><th class="num">65+ per 100 aged 20–64</th></tr></thead>
+        <tbody>${traj}</tbody></table>
+        <p class="src">Source: UN World Population Prospects 2024 (medium variant); 2025 is a projection.</p>
+      </section>
     </div>
-    ${sourceLine(`${SOURCES.population}. ${SOURCES.hdi}. ${SOURCES.lifeExpectancy}.`)}
+  </div>`;
+}
+
+// ---------------- Regions ----------------
+export function viewRegions(state) {
+  const layer = LAYERS.find((l) => l.key === state.mapLayer);
+  const tabs = LAYERS.map((l) =>
+    `<button class="pill${state.mapLayer === l.key ? ' active' : ''}" data-map-layer="${l.key}">${l.label}</button>`).join('');
+  const sel = countryByCode(state.selectedCode);
+  const regionRows = REGIONS.filter((r) => regionLayerValue(state.mapLayer, r) !== null);
+  const rmax = Math.max(...regionRows.map((r) => regionLayerValue(state.mapLayer, r)));
+  const ranking = regionRows.map((r) => {
+    const v = regionLayerValue(state.mapLayer, r);
+    const txt = state.mapLayer === 'gdp' ? '$' + v.toFixed(2) + 'tn'
+      : state.mapLayer === 'gdpPerCapita' ? '$' + fmtInt(v)
+      : state.mapLayer === 'population' ? fmtInt(v) + 'm' : v.toFixed(3);
+    return barRow(r.name, txt, (v / rmax) * 100);
+  }).join('');
+  const compare = state.compareCode && state.compareCode !== sel.code
+    ? (() => {
+      const o = countryByCode(state.compareCode);
+      const diff = (sel.gdp[5] - o.gdp[5]);
+      const more = diff >= 0 ? 'larger' : 'smaller';
+      return `<div class="compare-box"><strong>${esc(sel.name)}</strong> has a GDP of $${sel.gdp[5].toFixed(2)} trillion, ` +
+        `${Math.abs(diff).toFixed(2)} trillion ${more} than <strong>${esc(o.name)}</strong> ($${o.gdp[5].toFixed(2)} trillion). ` +
+        `${esc(sel.name)} has ${fmtInt(sel.population)} million people against ${fmtInt(o.population)} million in ${esc(o.name)}.</div>`;
+    })() : '';
+  const options = COUNTRIES.map((c) =>
+    `<option value="${c.code}"${state.compareCode === c.code ? ' selected' : ''}>${esc(c.name)}</option>`).join('');
+  return `
+  <div class="page-head">
+    <div><h1>Regions — the world, layer by layer</h1>
+    <p class="dek">Switch layers to recolour the map and the ranking. Click a country marker — or a
+    continent — to inspect it. Regional totals are calculated from the ten country figures.</p></div>
+    <div><button class="btn amber" id="export-csv">Export Regional CSV</button></div>
+  </div>
+  <div class="pills" style="margin-bottom:12px" role="tablist" aria-label="Map layer">${tabs}</div>
+  <div class="grid-2">
+    <section class="panel">
+      <h2>World Map — ${esc(layer.label)}</h2>
+      <p class="panel-sub">Equirectangular projection — simplified continent outlines. Active layer: ${esc(layer.label)} (click any country to inspect).</p>
+      <div class="map-wrap" id="world-map">${worldMap(state.mapLayer, state.selectedCode)}</div>
+      <p class="src">Sources: IMF WEO October 2026 (GDP); World Bank WDI 2025 (population, GDP per capita); UNDP HDR 2025 (HDI, 2023). Marker labels show the active layer value.</p>
+    </section>
+    <div>
+      <section class="panel">
+        <div class="detail-name">${esc(sel.name)}</div>
+        <div class="detail-region">${esc(sel.region)} · Population ${fmtInt(sel.population)} million (2025)</div>
+        <div class="stat-grid">
+          <div class="stat-cell"><div class="s-val">$${sel.gdp[5].toFixed(2)}tn</div><div class="s-lab">GDP (2025)</div></div>
+          <div class="stat-cell"><div class="s-val">$${fmtInt(sel.gdpPerCapita)}</div><div class="s-lab">GDP per capita (2025)</div></div>
+          <div class="stat-cell"><div class="s-val">${sel.hdi.toFixed(3)}</div><div class="s-lab">HDI (2023)</div></div>
+          <div class="stat-cell"><div class="s-val">${sel.unemployment.toFixed(1)}%</div><div class="s-lab">Unemployment (2025)</div></div>
+        </div>
+        <h3 style="margin-top:12px">Region Ranking — ${esc(layer.label)}</h3>
+        ${ranking}
+        <div class="compare-box"><label for="compare-select"><strong>Compare country:</strong></label>
+        <select id="compare-select"><option value="">Choose a country…</option>${options}</select></div>
+        ${compare}
+      </section>
+    </div>
+  </div>
+  <section class="panel">
+    <h2>Benchmark Countries — Sortable Comparison (2025)</h2>
+    <p class="panel-sub">Click any column header to sort. All figures 2025 except HDI (2023).</p>
+    ${rankingsTable(state, 'benchmark')}
   </section>`;
 }
 
-// ---- Archive ------------------------------------------------------------
-
+// ---------------- Data Tables (Archive) ----------------
 export function viewArchive(state) {
-  const query = (state.archiveQuery ?? "").trim().toLowerCase();
-  const rows = [];
-  const worldRows = [
-    { country: "World", indicator: "GDP", value: `$${formatNumber(WORLD.gdpTn, 2)}tn`, year: 2025, source: WORLD.gdpSource },
-    { country: "World", indicator: "Population", value: `${formatNumber(WORLD.populationM, 2)}m`, year: 2025, source: WORLD.populationSource },
-    { country: "World", indicator: "GDP per capita", value: `$${formatNumber(WORLD.gdpPerCapita, 0)}`, year: 2025, source: WORLD.gdpPerCapitaSource },
-    { country: "World", indicator: "Human Development Index", value: formatNumber(WORLD.hdi, 3), year: 2023, source: WORLD.hdiSource },
-  ];
-  for (const r of worldRows) rows.push(r);
-  for (const c of COUNTRIES) {
-    for (const y of YEARS) {
-      rows.push({
-        country: c.name,
-        indicator: `GDP (${y})`,
-        value: `$${formatNumber(gdpOf(c, y), 2)}tn`,
-        year: y,
-        source: "IMF, World Economic Outlook, October 2026",
-      });
-    }
-    rows.push({ country: c.name, indicator: "GDP per capita", value: `$${formatNumber(c.gdpPerCapita, 0)}`, year: 2025, source: "World Bank, World Development Indicators" });
-    rows.push({ country: c.name, indicator: "Population", value: `${formatNumber(c.populationM, 2)}m`, year: 2025, source: "World Bank, World Development Indicators" });
-    rows.push({ country: c.name, indicator: "Inflation", value: `${formatNumber(c.inflation, 1)}%`, year: 2025, source: "IMF, World Economic Outlook, October 2026" });
-    rows.push({ country: c.name, indicator: "Unemployment", value: `${formatNumber(c.unemployment, 1)}%`, year: 2025, source: "IMF, World Economic Outlook, October 2026" });
-    rows.push({ country: c.name, indicator: "Human Development Index", value: formatNumber(c.hdi, 3), year: 2023, source: "UNDP, Human Development Report 2025, Table 1" });
-    rows.push({ country: c.name, indicator: "Life expectancy", value: `${formatNumber(c.lifeExpectancy, 1)} years`, year: 2023, source: "UNDP, Human Development Report 2025, Table 1 / World Bank WDI" });
-  }
-
-  const visible = rows.filter((r) =>
-    !query ||
-    `${r.country} ${r.indicator} ${r.value} ${r.year} ${r.source}`.toLowerCase().includes(query),
-  );
-
-  const body = visible
-    .map((r) => `<tr><td>${r.country}</td><td>${r.indicator}</td><td class="num">${r.value}</td><td class="num">${r.year}</td><td>${r.source}</td></tr>`)
-    .join("");
-
+  const all = buildArchive();
+  const q = state.archiveQuery.trim().toLowerCase();
+  const rows = q ? all.filter((r) =>
+    (r.country + ' ' + r.indicator + ' ' + r.value + ' ' + r.year + ' ' + r.source).toLowerCase().includes(q)) : all;
+  const body = rows.map((r) => `<tr><td>${esc(r.country)}</td><td>${esc(r.indicator)}</td>
+    <td class="num">${esc(r.value)}</td><td class="num">${r.year}</td><td>${esc(r.source)}</td></tr>`).join('');
   return `
-  <section>
-    <h1>Archive</h1>
-    <p class="lede">Every figure on this site, in one place, with its source and year. Search for a country, an indicator or a source to filter the table.</p>
+  <div class="page-head">
+    <div><h1>Data Tables — the full archive</h1>
+    <p class="dek">Every figure on this site, in one searchable table: world aggregates, six years of
+    GDP for each of the ten countries, and six further indicators per country.</p></div>
+    <div class="edition-label"><strong>124 figures</strong>4 world · 60 GDP series · 60 indicators</div>
+  </div>
+  <section class="panel">
     <div class="archive-tools">
-      <label class="search-box">Search the archive
-        <input id="archive-search" type="search" placeholder="Try “Japan”, “inflation” or “UNDP”…" value="${state.archiveQuery ?? ""}" autocomplete="off">
-      </label>
-      <p class="archive-count" id="archive-count">${visible.length} of ${rows.length} figures shown</p>
+      <input id="archive-search" type="search" placeholder="Search the archive — try “Japan” or “HDI”…" value="${esc(state.archiveQuery)}" aria-label="Search the archive">
+      <span id="archive-count">${rows.length} of 124 figures shown</span>
     </div>
-    <div class="table-wrap">
-      <table class="data-table" id="archive-table">
-        <thead><tr><th>Country</th><th>Indicator</th><th class="num">Value</th><th class="num">Year</th><th>Source</th></tr></thead>
-        <tbody id="archive-body">${body}</tbody>
-      </table>
-    </div>
-    <p class="section-note">Figures verified 26 November 2026. GDP uses one vintage — IMF World Economic Outlook, October 2026 — for every country and every year, so years compare like with like. Where a figure could not be verified from an official source it is not shown at all.</p>
+    <div style="overflow-x:auto"><table><thead><tr><th>Country</th><th>Indicator</th><th class="num">Value</th><th class="num">Year</th><th>Source</th></tr></thead>
+    <tbody id="archive-body">${body}</tbody></table></div>
   </section>`;
 }
 
-export { INDICATORS };
+// ---------------- Sources ----------------
+export function viewSources() {
+  const items = [
+    { pub: 'IMF — World Economic Outlook, October 2026', use: 'Nominal GDP 2020–2025, inflation and unemployment for the ten countries; world GDP of $118.50 trillion.' },
+    { pub: 'World Bank — World Development Indicators, July 2026', use: 'Population and GDP per capita for the ten countries; world population of 8,215.43 million and world GDP per capita of $14,406.' },
+    { pub: 'UNDP — Human Development Report 2025', use: 'Human Development Index and life expectancy, 2023; world HDI of 0.756.' },
+    { pub: 'UN — World Population Prospects 2024 (medium variant)', use: 'World age structure, median age and dependency ratios; the 2025 pyramid is a projection.' },
+  ];
+  return `
+  <div class="page-head">
+    <div><h1>Sources</h1>
+    <p class="dek">Every number on this site comes from one of four official publications below.
+    Regional totals, shares and growth rates are calculated from those country figures and are
+    labelled “calculated” wherever they appear.</p></div>
+  </div>
+  <section class="panel"><ul class="source-list">
+    ${items.map((s) => `<li><div class="s-pub">${esc(s.pub)}</div><div class="s-use">${esc(s.use)}</div></li>`).join('')}
+  </ul></section>`;
+}
